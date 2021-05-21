@@ -58,15 +58,16 @@ def takeFirst(elem):
 
 
 if __name__ == '__main__':
-    pixel_size = 0.015
-    extention = 2
-    wheel_diam_range = [0.58 / 2, 0.88 / 2]
-    pixel_wheel_diam_rang = [int(wheel_diam_range[0] / pixel_size * 2), math.ceil(wheel_diam_range[1] / pixel_size * 2)]
+    pixel_size = 0.02
+    extention = 3
+    wheel_diam_range = [0.58 / 2, 0.90 / 2]
+    pixel_wheel_diam_rang = [int(wheel_diam_range[0] / pixel_size * extention),
+                             math.ceil(wheel_diam_range[1] / pixel_size * extention)]
     print(pixel_wheel_diam_rang)
     folder_path = "cars/"
     car_id = os.listdir(folder_path)
     for i in car_id:
-        if i not in ["car_22.npy"]:
+        if i not in ["car_04.npy"]:
             continue
         if i.endswith("npy"):
             print(i)
@@ -80,6 +81,7 @@ if __name__ == '__main__':
                 half_car = cut_2dcar(half_car, idx=1, limit=[p_min[1], p_max[1]])
                 # vtktool.vtk_show(car)
                 mosaic_matrix = pixel(half_car, pixel_size, p_min, p_max, darkest=1, extention=extention)
+                # from matplotlib import pyplot
                 # pyplot.figure(figsize=(20,5))
                 # c = pyplot.pcolormesh(mosaic_matrix, cmap='magma')
                 # pyplot.colorbar(c)
@@ -94,6 +96,7 @@ if __name__ == '__main__':
                      for i in range(len(mosaic_matrix))], dtype=numpy.uint8)
                 kernel_2 = numpy.ones((2, 2), dtype=numpy.uint8)
                 kernel_3 = numpy.ones((3, 3), dtype=numpy.uint8)
+                kernel_4 = numpy.ones((4, 4), dtype=numpy.uint8)
                 dilate = cv2.dilate(img, kernel_2, iterations=1)
                 erosion = cv2.erode(dilate, kernel_3, iterations=1)
                 ss = numpy.hstack((img, erosion))
@@ -105,10 +108,12 @@ if __name__ == '__main__':
                 count = 0
                 drop_wheel = []
                 big_contours_idx = []
+                biggest_contours = None
+                biggest_contours_idx = None
                 for i in range(len(contours)):
                     if cv2.contourArea(contours[i]) > 1000:
-                        count += 1
                         big_contours_idx.append(i)
+                        count += 1
                         shadow_bw = cv2.drawContours(empyt_img_bw, contours, i, color=255, thickness=-1)
                         shadow_c = cv2.drawContours(empyt_img_c, contours, i, color=255, thickness=-1)
                         if cv2.contourArea(contours[i]) < 10000:
@@ -118,63 +123,77 @@ if __name__ == '__main__':
                                 (x, y, radius) = numpy.int0((x, y, radius))
                                 cv2.circle(empyt_img_c, (x, y), radius, (0, 0, 255), 2)
                                 cv2.circle(empyt_img_c, (x, y), 2, (0, 0, 255), 3)
+                        else:
+                            biggest_contours = contours[i].copy()
+                            biggest_contours_idx = i
+                            hull = cv2.convexHull(biggest_contours, returnPoints=False)
+                            defects = cv2.convexityDefects(biggest_contours, hull)
+                            # print(biggest_contours)
+
+                            # defects = cv2.convexityDefects(contours[i], hull)
+                            # hull = cv2.convexHull(contours[i], returnPoints=True)
+                            # print(defects)
+                            for i in range(defects.shape[0]):
+                                s, e, f, d = defects[i, 0]
+                                start = tuple(biggest_contours[s][0])
+                                end = tuple(biggest_contours[e][0])
+                                far = tuple(biggest_contours[f][0])
+                                cv2.line(empyt_img_c, start, end, [0, 255, 0], 2)
+                                cv2.circle(empyt_img_c, far, 5, [0, 0, 255], -1)
+                            contours[i] = biggest_contours
+                            # cv2.drawContours(empyt_img_c, [hull], 0, (147, 0, 255), 2)
+                            # cv2.polylines(empyt_img_c, hull, True, (0, 255, 0), 2)
 
                 print("drop wheel", drop_wheel)
 
-                # cv2.drawContours(image, contours, 0, (0, 255, 75), 1)
-                # image = cv2.cvtColor(image, closing)
-                # cv2.imshow('cleaner', img)  # Figure 3
-                # cv2.waitKey(0)
-
-                # img = cv2.medianBlur(img, 3)
-                # cimg = cv2.cvtColor(img,cv2.COLOR_GRAY2BGR)
                 real_wheel = []
 
                 # 根据等高线查找霍夫圆，这一步的目的是和上一步通过腐蚀剥离的块的外接圆比较，如果两者相似度高，则认为外接圆是正确的轮子。
                 # 因此如果，上一步没有剥离出外接圆，则没有必要进行霍夫圆查找
-                if drop_wheel:
-                    hough_wheel = cv2.HoughCircles(empyt_img_bw, cv2.HOUGH_GRADIENT, dp=1, minDist=300,
-                                                   param1=50, param2=5, minRadius=pixel_wheel_diam_rang[0],
-                                                   maxRadius=pixel_wheel_diam_rang[1])
-                    if hough_wheel is not None:
-                        hough_wheel = numpy.uint16(numpy.around(hough_wheel))
-                        for i in hough_wheel[0, :]:
-                            cv2.circle(empyt_img_c, (i[0], i[1]), i[2], (0, 255, 0), 2)
-                            cv2.circle(empyt_img_c, (i[0], i[1]), 2, (0, 255, 0), 3)
-                            for dw in drop_wheel:
-                                if abs(dw[1] - i[1]) < (dw[2] + i[2]) / 2 * 0.3 and \
-                                        abs(dw[2] - i[2]) < min(dw[2], i[2]) * 0.5 and\
-                                        abs(dw[0] - i[0]) < (dw[2] + i[2]) / 2 * 0.5:
-                                    real_wheel.append(dw)
-                                    print(i, dw)
-                                    break
-                    # 如果只比对除了一个正确的轮子，则以这个正确的轮子为基准比较其他的外接圆和霍夫圆，如果相似度够高，则取为另一个轮子
-                    if len(real_wheel) == 1:
-                        sample_wheel = real_wheel[0]
-                        print("real wheel11111", real_wheel)
-                        drop_wheel.remove(sample_wheel)
-                        for w in drop_wheel:
-                            if abs(w[0] - sample_wheel[0]) > 300 and abs(w[1] - sample_wheel[1]) < sample_wheel[2] * 0.2 \
-                                    and abs(w[2] - sample_wheel[2]) < sample_wheel[2] * 0.2:
-                                real_wheel.append(w)
-                                drop_wheel.remove(w)
-                                break
-                        if len(real_wheel) < 2:
-                            for w in hough_wheel[0, :]:
-                                if abs(w[0] - sample_wheel[0]) > 300 and abs(w[1] - sample_wheel[1]) < sample_wheel[
-                                    2] * 0.2 \
-                                        and abs(w[2] - sample_wheel[2]) < sample_wheel[2] * 0.1:
-                                    real_wheel.append(w)
-                                    break
-                    real_wheel = numpy.array(real_wheel, dtype=numpy.uint16)
-                    for w in real_wheel:
-                        cv2.circle(empyt_img_c, (w[0], w[1]), w[2],
-                                   (0, 255, 255), 2)
-                        cv2.circle(empyt_img_c, (w[0], w[1]), 2, (0, 255, 255), 3)
 
+                hough_wheel = cv2.HoughCircles(empyt_img_bw, cv2.HOUGH_GRADIENT, dp=1, minDist=300,
+                                               param1=50, param2=5, minRadius=pixel_wheel_diam_rang[0],
+                                               maxRadius=pixel_wheel_diam_rang[1])
+                if hough_wheel is not None:
+                    hough_wheel = numpy.uint16(numpy.around(hough_wheel))
+                    for i in hough_wheel[0, :]:
+                        cv2.circle(empyt_img_c, (i[0], i[1]), i[2], (0, 255, 0), 2)
+                        cv2.circle(empyt_img_c, (i[0], i[1]), 2, (0, 255, 0), 3)
+                        for dw in drop_wheel:
+                            if abs(dw[1] - i[1]) < (dw[2] + i[2]) / 2 * 0.3 and \
+                                    abs(dw[2] - i[2]) < min(dw[2], i[2]) * 0.5 and \
+                                    abs(dw[0] - i[0]) < (dw[2] + i[2]) / 2 * 0.5:
+                                real_wheel.append(dw)
+                                break
+                # 如果只比对除了一个正确的轮子，则以这个正确的轮子为基准比较其他的外接圆和霍夫圆，如果相似度够高，则取为另一个轮子
+                if len(real_wheel) == 1:
+                    sample_wheel = real_wheel[0]
+                    print("real wheel11111", real_wheel)
+                    drop_wheel.remove(sample_wheel)
+                    for w in drop_wheel:
+                        if abs(w[0] - sample_wheel[0]) > 300 and abs(w[1] - sample_wheel[1]) < sample_wheel[2] * 0.2 \
+                                and abs(w[2] - sample_wheel[2]) < sample_wheel[2] * 0.2:
+                            real_wheel.append(w)
+                            drop_wheel.remove(w)
+                            break
+                    if len(real_wheel) < 2:
+                        for w in hough_wheel[0, :]:
+                            if abs(w[0] - sample_wheel[0]) > 300 and abs(w[1] - sample_wheel[1]) < sample_wheel[
+                                2] * 0.2 \
+                                    and abs(w[2] - sample_wheel[2]) < sample_wheel[2] * 0.1:
+                                real_wheel.append(w)
+                                break
+                real_wheel = numpy.array(real_wheel, dtype=numpy.uint16)
+                for w in real_wheel:
+                    cv2.circle(empyt_img_c, (w[0], w[1]), w[2],
+                               (0, 255, 255), 2)
+                    cv2.circle(empyt_img_c, (w[0], w[1]), 2, (0, 255, 255), 3)
+                if len(real_wheel) == 2:
+                    continue
                 # 如果还是没有找齐两个轮子，则对等高线进行圆拟合
                 if len(real_wheel) < 2:
                     outline = []
+                    # outline = [j[0] for j in biggest_contours.tolist()]
                     # 把等高线的点提出来，作为轮廓线
                     for i in big_contours_idx:
                         outline += [j[0] for j in contours[i].tolist()]
@@ -182,6 +201,7 @@ if __name__ == '__main__':
                     mid = (p_max[0] - p_min[0]) / pixel_size * extention / 2
                     outline_split = [[], []]
                     lowest = [[], []]
+                    highest = [[], []]
                     for p in outline:
                         if p[0] < mid:
                             switch = 0
@@ -196,10 +216,21 @@ if __name__ == '__main__':
                                 lowest[switch].append(p)
                         else:
                             lowest[switch].append(p)
-                    print("low",lowest)
+                        if p[1] < 90:
+                            if highest[switch]:
+                                if highest[switch][0][1] < p[1]:
+                                    highest[switch].clear()
+                                    highest[switch].append(p)
+                                elif highest[switch][0][1] == p[1]:
+                                    highest[switch].append(p)
+                            else:
+                                highest[switch].append(p)
+                    print("low", lowest)
+                    print("high", highest)
+
                     # 如果左轮已经找到，则左边不找，如果右轮已经找到，则右边不找
                     if len(real_wheel) == 1:
-                        if real_wheel[0][1] > mid:
+                        if real_wheel[0][0] > mid:
                             switch_list = [0]
                         else:
                             switch_list = [1]
@@ -209,12 +240,18 @@ if __name__ == '__main__':
                                         sum([i[0] for i in lowest[1]]) / len(lowest[1])]
                     # 找轮子
                     fitting_circle = []
+
+
                     def sum_error(point_list: list, x: float, y: float, r: float):
                         res = 0
                         for p in point_list:
-                            res += (r - math.sqrt((x - p[0]) ** 2 + (y - p[1]) ** 2)) ** 2
+                            one_err = (r - math.sqrt((x - p[0]) ** 2 + (y - p[1]) ** 2)) ** 2
+                            res += one_err
                         return res
-                    from scipy.optimize import fmin
+
+
+                    from scipy.optimize import minimize
+
                     fitting_points = [[], []]
                     for switch in switch_list:
                         # 将
@@ -228,20 +265,26 @@ if __name__ == '__main__':
                         para_estimate = numpy.array([round(suppose_center_x[switch]), pixel_wheel_diam_rang[1],
                                                      pixel_wheel_diam_rang[1]])
                         print("**", para_estimate)
-                        a = fmin(lambda para_list: sum_error(point_list=fitting_points[switch],
-                                                             x=para_list[0], y=para_list[1], r=para_list[2]),
-                                 x0=para_estimate)
-                        if a[1]-a[2] > lowest[switch][0][1]:
-                            a[1] = lowest[switch][0][1]+a[2]
-                        fitting_circle.append([a[0], a[1], a[2]])
-                    print("fc",fitting_circle)
+                        a = minimize(lambda para_list: sum_error(point_list=fitting_points[switch],
+                                                                  x=para_list[0], y=para_list[1], r=para_list[2]),
+                                      x0 = para_estimate,
+                                      bounds=((suppose_center_x[switch] - (pixel_wheel_diam_rang[1] + pixel_wheel_diam_rang[0]) / 2,
+                                               suppose_center_x[switch] + (pixel_wheel_diam_rang[1] + pixel_wheel_diam_rang[0]) / 2),
+                                              (pixel_wheel_diam_rang[0], pixel_wheel_diam_rang[1]),
+                                              (pixel_wheel_diam_rang[0], pixel_wheel_diam_rang[1]))
+                                      )
+                        print(a.x)
+                        # if a[1] - a[2] > lowest[switch][0][1]:
+                        #     a[1] = lowest[switch][0][1] + a[2]
+                        fitting_circle.append([a.x[0], a.x[1], a.x[2]])
+                    print("fc", fitting_circle)
                     from math_tools import build_cicle, new_plot
                     from matplotlib import pyplot
+
                     new_plot(outline)
-                    new_plot(fitting_points[0],"r")
-                    new_plot(fitting_points[1], "r")
                     for i in range(len(fitting_circle)):
-                        new_plot(build_cicle([fitting_circle[i][0],fitting_circle[i][1]],fitting_circle[i][2]))
+                        new_plot(fitting_points[switch], "r")
+                        new_plot(build_cicle([fitting_circle[i][0], fitting_circle[i][1]], fitting_circle[i][2]))
                     pyplot.axis("equal")
                     pyplot.show()
                     fitting_circle = numpy.array(fitting_circle, dtype=numpy.uint16)
