@@ -4,6 +4,8 @@ import os
 import cv2
 import numpy
 
+from math_tools import build_cicle, new_plot, interpolate_by_x
+from matplotlib import pyplot
 
 def get_min_max_3d(car):
     p_min = car[0].copy()
@@ -67,8 +69,8 @@ if __name__ == '__main__':
     folder_path = "cars/"
     car_id = os.listdir(folder_path)
     for i in car_id:
-        if i not in ["car_04.npy"]:
-            continue
+        # if i not in ["car_17.npy"]:
+        #     continue
         if i.endswith("npy"):
             print(i)
             path2d = "cars/" + i
@@ -81,7 +83,6 @@ if __name__ == '__main__':
                 half_car = cut_2dcar(half_car, idx=1, limit=[p_min[1], p_max[1]])
                 # vtktool.vtk_show(car)
                 mosaic_matrix = pixel(half_car, pixel_size, p_min, p_max, darkest=1, extention=extention)
-                # from matplotlib import pyplot
                 # pyplot.figure(figsize=(20,5))
                 # c = pyplot.pcolormesh(mosaic_matrix, cmap='magma')
                 # pyplot.colorbar(c)
@@ -124,25 +125,22 @@ if __name__ == '__main__':
                                 cv2.circle(empyt_img_c, (x, y), radius, (0, 0, 255), 2)
                                 cv2.circle(empyt_img_c, (x, y), 2, (0, 0, 255), 3)
                         else:
-                            biggest_contours = contours[i].copy()
+                            biggest_contours =[i[0] for i in  contours[i]]
+                            biggest_contours.append(biggest_contours[0])
                             biggest_contours_idx = i
-                            hull = cv2.convexHull(biggest_contours, returnPoints=False)
-                            defects = cv2.convexityDefects(biggest_contours, hull)
-                            # print(biggest_contours)
+                            biggest_contours = interpolate_by_x(biggest_contours)
+                            y_limit = [None for j in range(len(mosaic_matrix[0]))]
+                            for p in biggest_contours:
+                                if y_limit[p[0]] and p[1] < y_limit[p[0]] or y_limit[p[0]] is None:
+                                    y_limit[p[0]] = p[1]
+                            pyplot.plot(y_limit,"r*-")
+                            from scipy.signal import savgol_filter
+                            savgol = savgol_filter(y_limit, 31, 3)
+                            pyplot.plot(savgol, "g-")
 
-                            # defects = cv2.convexityDefects(contours[i], hull)
-                            # hull = cv2.convexHull(contours[i], returnPoints=True)
-                            # print(defects)
-                            for i in range(defects.shape[0]):
-                                s, e, f, d = defects[i, 0]
-                                start = tuple(biggest_contours[s][0])
-                                end = tuple(biggest_contours[e][0])
-                                far = tuple(biggest_contours[f][0])
-                                cv2.line(empyt_img_c, start, end, [0, 255, 0], 2)
-                                cv2.circle(empyt_img_c, far, 5, [0, 0, 255], -1)
-                            contours[i] = biggest_contours
-                            # cv2.drawContours(empyt_img_c, [hull], 0, (147, 0, 255), 2)
-                            # cv2.polylines(empyt_img_c, hull, True, (0, 255, 0), 2)
+                            pyplot.axis("equal")
+                            # pyplot.show()
+
 
                 print("drop wheel", drop_wheel)
 
@@ -278,8 +276,7 @@ if __name__ == '__main__':
                         #     a[1] = lowest[switch][0][1] + a[2]
                         fitting_circle.append([a.x[0], a.x[1], a.x[2]])
                     print("fc", fitting_circle)
-                    from math_tools import build_cicle, new_plot
-                    from matplotlib import pyplot
+
 
                     new_plot(outline)
                     for i in range(len(fitting_circle)):
