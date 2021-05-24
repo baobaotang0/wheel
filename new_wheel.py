@@ -34,11 +34,11 @@ for path in path_iter():
     mosaic_matrix = pixel(car, pixel_size, p_min, p_max, darkest=1, extention=extention)
     # mosaic_matrix = reverse_black_white(mosaic_matrix)
     #
-    pyplot.figure(figsize=(20,5))
-    c = pyplot.pcolormesh(mosaic_matrix, cmap='magma')
-    pyplot.colorbar(c)
-    pyplot.axis("equal")
-    pyplot.show()
+    # pyplot.figure(figsize=(20,5))
+    # c = pyplot.pcolormesh(mosaic_matrix, cmap='magma')
+    # pyplot.colorbar(c)
+    # pyplot.axis("equal")
+    # pyplot.show()
 
     img = mosaic_matrix
     empyt_img_bw = numpy.array([numpy.array([[0] for j in range(len(mosaic_matrix[0]))], dtype=numpy.uint8)
@@ -52,19 +52,28 @@ for path in path_iter():
     erosion = cv2.erode(dilate, kernel_n(5), iterations=1)
     # erosion = cv2.erode(erosion, kernel_n(3), iterations=1)
     erosion = cv2.bitwise_not(erosion)
-    ss = numpy.hstack((img, erosion))
-    cv2.imshow('cleaner', ss)
-    cv2.waitKey(0)
+    # ss = numpy.hstack((img, erosion))
+    # cv2.imshow('cleaner', ss)
+    # cv2.waitKey(0)
     contours, hierarchy = cv2.findContours(erosion, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
     hierarchy = numpy.squeeze(hierarchy)
 
     contours_idx = []
     for i in range(len(contours)):
-        if cv2.contourArea(contours[i]) > 1000:
+        if cv2.contourArea(contours[i]) > 10000: # TODO:if empty
+            print(i, cv2.contourArea(contours[i]))
             contours_idx.append(i)
             color = (255, 102, 102)
             shadow_bw = cv2.drawContours(empyt_img_bw, contours, i, color=255, thickness=-1)
             shadow_c = cv2.drawContours(empyt_img_c, contours, i, color=color, thickness=-1)
 
-    cv2.imshow('car', empyt_img_c)
+    row, col = empyt_img_c.shape[:2]
+    [vx, vy, x, y] = cv2.fitLine(contours[0], cv2.DIST_L2, 0, 0.01, 0.01)
+    ly = int((-x * vy / vx) + y)
+    ry = int(((col - x) * vy / vx) + y)
+    cv2.line(empyt_img_c, (col - 1, ry), (0, ly), (255, 0, 255), 2)
+    cv2.imshow("result", empyt_img_c)
+
+
+    # cv2.imshow('car', empyt_img_c)
     cv2.waitKey(0)

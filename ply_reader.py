@@ -19,8 +19,8 @@ def ply_loader(path):
 def path_iter():
     ROOT_PATH = "platform_data/"
     for p in os.listdir(ROOT_PATH):
-        if p != "box_002.ply":
-            continue
+        # if p != "box_002.ply":
+        #     continue
         if p.endswith('.ply'):
             print(p)
             yield os.path.join(ROOT_PATH, p)

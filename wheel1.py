@@ -56,10 +56,7 @@ def pixel(car: list, pixel_size, p_min: list, p_max: list, darkest: float, exten
     return res
 
 
-def takeFirst(elem):
-    return elem[0]
-a =[[0,0],[1,1]]
-a.sort(key=takeFirst)
+
 
 if __name__ == '__main__':
     pixel_size = 0.02
@@ -71,7 +68,7 @@ if __name__ == '__main__':
     folder_path = "cars/"
     car_id = os.listdir(folder_path)
     for i in car_id:
-        # if i not in ["car_17.npy"]:
+        # if i not in ["car_15.npy"]:
         #     continue
         if i.endswith("npy"):
             print(i)
@@ -146,8 +143,8 @@ if __name__ == '__main__':
                         if y_limit[i]:
                             y_limit_continuous.append([i, y_limit[i]])
                     y_limit_continuous = interpolate_by_stepLen(y_limit_continuous, 5)
-                    pyplot.plot(y_limit,"rs-")
-                    new_plot(y_limit_continuous, "b*-")
+                    pyplot.plot(y_limit,"r-+")
+                    # new_plot(y_limit_continuous, "b*-")
                     v = []
                     for i in range(len(y_limit_continuous)-1):
                         p1 = y_limit_continuous[i]
@@ -163,7 +160,7 @@ if __name__ == '__main__':
                     v= v_head+v
                     from scipy.signal import savgol_filter
                     savgol_v = savgol_filter([i[1] for i in v], 11, 5)
-                    pyplot.plot(savgol_v, "g-")
+                    # pyplot.plot(savgol_v, "g-")
 
                     new_plot(v)
 
@@ -178,7 +175,7 @@ if __name__ == '__main__':
                     lowest = [[], []]
                     print(len(y_limit))
                     for i in range(len(y_limit)):
-                        if y_limit[i]:
+                        if y_limit[i] is not None:
                             p = [i, y_limit[i]]
                             if i < mid:
                                 switch = 0
@@ -187,15 +184,13 @@ if __name__ == '__main__':
                             outline_split[switch].append(p)
                             if lowest[switch]:
                                 if lowest[switch][0][1] > p[1]:
-                                    print(lowest[switch])
-                                    print(p)
                                     lowest[switch].clear()
                                     lowest[switch].append(p)
                                 elif lowest[switch][0][1] == p[1]:
                                     lowest[switch].append(p)
                             else:
                                 lowest[switch].append(p)
-                    print("low", lowest)
+
                     suppose_center_x = [sum([i[0] for i in lowest[0]]) / len(lowest[0]),
                                         sum([i[0] for i in lowest[1]]) / len(lowest[1])]
                     # 如果左轮已经找到，则左边不找，如果右轮已经找到，则右边不找
@@ -224,33 +219,47 @@ if __name__ == '__main__':
 
                     fitting_points = [[], []]
                     for switch in switch_list:
-                        left,right = v[round(suppose_center_x[switch])], v[round(suppose_center_x[switch])]
+                        print("low", lowest[switch])
+                        left = [v[round(suppose_center_x[switch])], v[round(suppose_center_x[switch])]]
+                        right = [v[round(suppose_center_x[switch])], v[round(suppose_center_x[switch])]]
                         for i in range(max(int(suppose_center_x[switch] - pixel_wheel_diam_rang[0]*0.5),0),
                                         int(suppose_center_x[switch] - pixel_wheel_diam_rang[1]*1.2), -1):
-                            if left[1] > v[i][1]:
-                                left = v[i-1] # 寻找斜率最低点，左侧n个点通常是开始上升的地方，n粗略取1
+                            if left[0][1] < v[i][1]:
+                                left[0] = v[i]
+                            if left[1][1] > v[i][1]:
+                                left[1] = v[i]
                         for i in range(int(suppose_center_x[switch] + pixel_wheel_diam_rang[0] * 0.5),
                                     min(int(suppose_center_x[switch] + pixel_wheel_diam_rang[1] * 1.2),len(v))):
-                            if right[1] < v[i][1]:
-                                right = v[i+1] # 寻找斜率最高点，右侧n个点通常是开始下降的地方，n粗略取1
-                        print()
-                        new_plot([suppose_center_x[switch],0],"go")
+                            if right[0][1] < v[i][1]:
+                                right[0] = v[i]
+                            if right[1][1] > v[i][1]:
+                                right[1] = v[i]
+                        bds = [None,None]
+                        if left[0][0] > left[1][0] and abs(left[1][1]/left[0][1]) > 1.5:
+                            bds[0] = left[1][0]-1
+                        else:
+                            bds[0] = left[0][0]+1
+                        if right[0][0] > right[1][0] and abs(right[0][1]/right[1][1]) > 1.5:
+                            bds[1] = right[0][0]+1
+                        else:
+                            bds[1] = right[1][0] - 1
+
+                        new_plot([suppose_center_x[switch],0],"co")
                         new_plot(left,"ro")
                         new_plot(right, "ro")
+                        new_plot([v[bds[0]],v[bds[1]]],"b^")
                         new_plot(v[int(suppose_center_x[switch] + pixel_wheel_diam_rang[0] * 0.5)],"yo")
                         new_plot(v[max(int(suppose_center_x[switch] - pixel_wheel_diam_rang[0]*0.5),0)], "yo")
                         new_plot(v[int(suppose_center_x[switch] - pixel_wheel_diam_rang[1]*1.2)], "yo")
-                        new_plot(v[min(int(suppose_center_x[switch] + pixel_wheel_diam_rang[1] * 1.2),len(v))], "yo")
-
-                        fitting_points[switch] = numpy.array([[i,y_limit[i]]for i in range(left[0],right[0]+1)])
-                        print()
+                        new_plot(v[min(int(suppose_center_x[switch] + pixel_wheel_diam_rang[1] * 1.2),len(v)-1)], "yo")
+                        fitting_points[switch] = numpy.array([[i,y_limit[i]]for i in range(bds[0],bds[1]+1)])
                         para_estimate = numpy.array([round(suppose_center_x[switch]), pixel_wheel_diam_rang[1],
                                                      pixel_wheel_diam_rang[1]])
                         print("**", para_estimate)
                         a = minimize(lambda para_list: sum_error(point_list=fitting_points[switch],
                                                                   x=para_list[0], y=para_list[1], r=para_list[2]),
                                       x0 = para_estimate,
-                                      bounds=((left[0] + pixel_wheel_diam_rang[0]*0.5, right[0] - pixel_wheel_diam_rang[0]*0.5),
+                                      bounds=((bds[0] + pixel_wheel_diam_rang[0]*0.5, bds[1] - pixel_wheel_diam_rang[0]*0.5),
                                               (pixel_wheel_diam_rang[0], pixel_wheel_diam_rang[1]),
                                               (pixel_wheel_diam_rang[0], pixel_wheel_diam_rang[1]))
                                       )
@@ -273,8 +282,8 @@ if __name__ == '__main__':
                     pyplot.show()
                     fitting_circle = numpy.array(fitting_circle, dtype=numpy.uint16)
                     for c in fitting_circle:
-                        cv2.circle(empyt_img_c, (c[0], c[1]), c[2], (0, 100, 0), 2)
-                        cv2.circle(empyt_img_c, (c[0], c[1]), 2, (0, 100, 0), 3)
+                        cv2.circle(empyt_img_c, (c[0], c[1]), c[2], (0, 255, 0), 2)
+                        cv2.circle(empyt_img_c, (c[0], c[1]), 2, (0, 255, 0), 3)
                 #
                 # cv2.imshow('detected hough_wheel', empyt_img_c)
                 # cv2.waitKey(0)
