@@ -144,7 +144,8 @@ def pixel(cloud: list, pixel_size: float, p_min: list, p_max: list, darkest: flo
     return res
 
 
-
+def kernel_n(n):
+    return numpy.ones((n, n), dtype=numpy.uint8)
 
 def interpolate_by_stepLen(outline: list, dis_step: float):
     """需要提前检查重合点"""
