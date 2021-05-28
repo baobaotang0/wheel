@@ -1,18 +1,41 @@
 import math
-
 import numpy
+import cv2
 from matplotlib import pyplot
 
 
 def new_plot(l: list, style=None):
     if l is not []:
         if style:
-            if isinstance(l[0], list):
-                pyplot.plot([p[0] for p in l], [p[1] for p in l], style)
-            else:
+            if isinstance(l[0], float) or isinstance(l[0], int):
                 pyplot.plot(l[0], l[1], style)
+            else:
+                pyplot.plot([p[0] for p in l], [p[1] for p in l], style)
         else:
-            pyplot.plot([p[0] for p in l], [p[1] for p in l])
+            if isinstance(l[0], float) or isinstance(l[0], int):
+                pyplot.plot(l[0], l[1])
+            else:
+                pyplot.plot([p[0] for p in l], [p[1] for p in l])
+
+def plot_mosaic(pictures):
+    from matplotlib import pyplot
+    pyplot.figure(figsize=(20, 5))
+    c = pyplot.pcolormesh(pictures, cmap='magma')
+    pyplot.colorbar(c)
+    pyplot.axis("equal")
+    pyplot.show()
+
+def plot_opencv(picture):
+    cv2.imshow('detected hough_wheel', picture)
+    cv2.waitKey(0)
+
+def add_opencv_circle(picture,circle_para, color):
+    cv2.circle(picture, (circle_para[0], circle_para[1]), circle_para[2], color, 2)
+    cv2.circle(picture, (circle_para[0], circle_para[1]), 2, color, 3)
+
+
+def takeSecond(element):
+    return element[1]
 
 
 def build_cicle(center: list, radius: float, lineNum=12):
@@ -116,21 +139,26 @@ def cut_cloud(cloud: list, boundary: dict, need_rest=False):
         return res
 
 
-def pixel(cloud: list, pixel_size: float, p_min: list, p_max: list, darkest: float, extention=1, colored=False):
+def pixel(cloud: list, pixel_size: float, p_min: list, p_max: list, darkest: float, ignore_num = 0, extention=1, colored=False):
     resolution = [math.ceil((p_max[0] - p_min[0]) / pixel_size), math.ceil((p_max[1] - p_min[1]) / pixel_size)]
     res = [[0 for j in range(extention * (resolution[0] + 1))] for i in range(extention * (resolution[1] + 1))]
     for p in cloud:
         i = int((p[0] - p_min[0]) / pixel_size)
         j = int((p[1] - p_min[1]) / pixel_size)
-        for k in range(extention):
-            for l in range(extention):
-                res[extention * j + k][extention * i + l] += 1
+        if i<= resolution[0]  and j <= resolution[1] :
+            for k in range(extention):
+                for l in range(extention):
+                    res[extention * j + k][extention * i + l] += 1
     for i in range(resolution[1]):
         for j in range(resolution[0]):
             if res[extention * i][extention * j] > darkest:
                 for k in range(extention):
                     for l in range(extention):
                         res[extention * i + k][extention * j + l] = 255
+            elif res[extention * i][extention * j] <= ignore_num:
+                for k in range(extention):
+                    for l in range(extention):
+                        res[extention * i + k][extention * j + l] = 0
             else:
                 for k in range(extention):
                     for l in range(extention):
@@ -142,6 +170,7 @@ def pixel(cloud: list, pixel_size: float, p_min: list, p_max: list, darkest: flo
                 res[i][j] = [res[i][j]] * 3
     res = numpy.array(res, dtype=numpy.uint8)
     return res
+
 
 
 def kernel_n(n):
@@ -168,3 +197,36 @@ def interpolate_by_stepLen(outline: list, dis_step: float):
     else:
         res[-1] = outline[-1]
     return res
+
+
+def sum_error(point_list, x: float, y: float, r: float):
+    res = 0
+    for p in point_list:
+        one_err = (r - math.sqrt((x - p[0]) ** 2 + (y - p[1]) ** 2)) ** 2
+        res += one_err
+    return res
+
+
+def split_list(input:list, judge_len=20):
+    res = [[input[0]]]
+    for i in range(1, len(input)):
+        if input[i][0] - res[-1][-1][0] <= judge_len:
+            res[-1].append(input[i])
+        else:
+            res.append([])
+            res[-1].append(input[i])
+    return res
+
+def get_lower_edge(max_len, contours_list):
+    res = [None for j in range(max_len)]
+    for car_part in contours_list:
+        car_part = [i[0] for i in car_part.tolist()]
+        car_part.append(car_part[0])
+        car_part = interpolate_by_pixel(car_part, False)
+        for p in car_part:
+            if res[p[0]] is None or p[1] < res[p[0]]:
+                res[p[0]] = p[1]
+    return res
+
+
+

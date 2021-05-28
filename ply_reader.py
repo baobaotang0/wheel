@@ -16,8 +16,8 @@ def ply_loader(path):
             data.append(point)
     return data
 
-def path_iter():
-    ROOT_PATH = "platform_data/"
+def path_iter(ROOT_PATH = "platform_data/"):
+
     for p in os.listdir(ROOT_PATH):
         # if p != "box_002.ply":
         #     continue

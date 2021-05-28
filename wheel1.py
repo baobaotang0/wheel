@@ -1,289 +1,260 @@
-import math
-import os
-
-import cv2
-import numpy
-
-from math_tools import build_cicle, new_plot, interpolate_by_stepLen, interpolate_by_pixel
-from ply_reader import *
-from matplotlib import pyplot
-
-def get_min_max_3d(car):
-    p_min = car[0].copy()
-    p_max = car[0].copy()
-    for p in car:
-        for i in range(3):
-            if p[i] < p_min[i]:
-                p_min[i] = p[i]
-            if p[i] > p_max[i]:
-                p_max[i] = p[i]
-    return p_min, p_max
+import cv2,numpy
 
 
-def cut_2dcar(car: list, idx: int, limit: list):
-    res = []
-    for p in car:
-        if limit[0] <= p[idx] <= limit[1]:
-            res.append([p[0], p[1]])
-    return res
-
-
-def pixel(car: list, pixel_size, p_min: list, p_max: list, darkest: float, extention=1, colored=False):
-    resolution = [math.ceil((p_max[0] - p_min[0]) / pixel_size), math.ceil((p_max[1] - p_min[1]) / pixel_size)]
-    res = [[0 for j in range(extention * (resolution[0] + 1))] for i in range(extention * (resolution[1] + 1))]
-    for p in car:
-        i = int((p[0] - p_min[0]) / pixel_size)
-        j = int((p[1] - p_min[1]) / pixel_size)
-        for k in range(extention):
-            for l in range(extention):
-                res[extention * j + k][extention * i + l] += 1
-    for i in range(resolution[1]):
-        for j in range(resolution[0]):
-            if res[extention * i][extention * j] > darkest:
-                for k in range(extention):
-                    for l in range(extention):
-                        res[extention * i + k][extention * j + l] = 255
-            else:
-                for k in range(extention):
-                    for l in range(extention):
-                        res[extention * i + k][extention * j + l] = int(
-                            255 / darkest * res[extention * i][extention * j])
-    if colored:
-        for i in range(len(res)):
-            for j in range(len(res[0])):
-                res[i][j] = [res[i][j]] * 3
-    res = numpy.array(res, dtype=numpy.uint8)
-    return res
+from math_tools import *
 
 
 
 
-if __name__ == '__main__':
+
+class WholeWheelFinder:
+    def __init__(self, car: list):
+        self.car = car
+        self.p_min, self.p_max = get_min_max(car)
+        self.real_wheel = [[], []]
+        self.mid = (self.p_min[2] + self.p_max[2]) / 2
+        # 网格化车侧面的点云，用二值图像表示
+        self.p_max[1] = 0.95
+        down_car = cut_cloud(self.car, boundary={1: [None, self.p_max[1]]})  # 剪掉车的上半部分，省计算
+        left_car, right_car  = cut_cloud(down_car, boundary={2: [self.mid, None]}, need_rest=True)
+        self.right_car = SideWheelFinder(right_car, self.p_min, self.p_max)
+        self.left_car = SideWheelFinder(left_car, self.p_min, self.p_max)
+        self.right_car.find_wheel()
+        self.left_car.find_wheel()
+        self.pixel_wheel = [self.left_car.wheels, self.right_car.wheels]
+        for w in self.pixel_wheel[0]:
+            self.real_wheel[0].append([self.p_min[0]+w[0]/self.right_car.extention*self.right_car.pixel_size,
+                                        self.p_min[1]+w[1]/self.right_car.extention*self.right_car.pixel_size,
+                                        self.p_max[2]])
+        for w in self.pixel_wheel[1]:
+            self.real_wheel[1].append([self.p_min[0]+w[0]/self.right_car.extention*self.right_car.pixel_size,
+                                        self.p_min[1]+w[1]/self.right_car.extention*self.right_car.pixel_size,
+                                        self.p_min[2]])
+
+
+    def get_wheel(self):
+        return self.real_wheel
+
+
+
+
+class SideWheelFinder:
     pixel_size = 0.02
     extention = 3
     wheel_diam_range = [0.58 / 2, 0.90 / 2]
     pixel_wheel_diam_rang = [int(wheel_diam_range[0] / pixel_size * extention),
                              math.ceil(wheel_diam_range[1] / pixel_size * extention)]
-    print(pixel_wheel_diam_rang)
-    folder_path = "cars/"
-    car_id = os.listdir(folder_path)
-    for i in car_id:
-        # if i not in ["car_15.npy"]:
-        #     continue
-        if i.endswith("npy"):
-            print(i)
-            path2d = "cars/" + i
-            with open(path2d, 'rb') as f_pos:
-                car = list(numpy.load(f_pos))
-                p_min, p_max = get_min_max_3d(car)
-                mid = (p_min[2] + p_max[2]) / 2
-                half_car = cut_2dcar(car, idx=2, limit=[mid, p_max[2]])
-                p_max[1] = 0.95
-                half_car = cut_2dcar(half_car, idx=1, limit=[p_min[1], p_max[1]])
-                # vtktool.vtk_show(car)
-                mosaic_matrix = pixel(half_car, pixel_size, p_min, p_max, darkest=1, extention=extention)
-                # pyplot.figure(figsize=(20,5))
-                # c = pyplot.pcolormesh(mosaic_matrix, cmap='magma')
-                # pyplot.colorbar(c)
-                # pyplot.axis("equal")
-                # pyplot.show()
 
-                img = mosaic_matrix
-                empyt_img_bw = numpy.array([numpy.array([[0] for j in range(len(mosaic_matrix[0]))], dtype=numpy.uint8)
-                                            for i in range(len(mosaic_matrix))], dtype=numpy.uint8)
-                empyt_img_c = numpy.array(
-                    [numpy.array([[0, 0, 0] for j in range(len(mosaic_matrix[0]))], dtype=numpy.uint8)
-                     for i in range(len(mosaic_matrix))], dtype=numpy.uint8)
-                kernel_2 = numpy.ones((2, 2), dtype=numpy.uint8)
-                kernel_3 = numpy.ones((3, 3), dtype=numpy.uint8)
-                kernel_4 = numpy.ones((4, 4), dtype=numpy.uint8)
-                dilate = cv2.dilate(img, kernel_2, iterations=1)
-                erosion = cv2.erode(dilate, kernel_3, iterations=1)
-                ss = numpy.hstack((img, erosion))
-                # cv2.imshow('cleaner', ss)
-                # cv2.waitKey(0)
-                # image = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                contours, hierarchy = cv2.findContours(erosion, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
-                hierarchy = numpy.squeeze(hierarchy)
-                drop_wheel = []
-                contours_idx = {"wheel":[],"car":[]}
-                for i in range(len(contours)):
-                    if cv2.contourArea(contours[i]) > 1000:
-                        (x, y), radius = cv2.minEnclosingCircle(contours[i])
-                        if pixel_wheel_diam_rang[0] < radius < pixel_wheel_diam_rang[1] and \
-                                pixel_wheel_diam_rang[0] < y < pixel_wheel_diam_rang[1]:
-                            contours_idx["wheel"].append(i)
-                            color = (153, 255, 255)
-                            drop_wheel.append([x, y, radius])
-                            (x, y, radius) = numpy.int0((x, y, radius))
-                            cv2.circle(empyt_img_c, (x, y), radius, (0, 0, 255), 2)
-                            cv2.circle(empyt_img_c, (x, y), 2, (0, 0, 255), 3)
-                        else:
-                            contours_idx["car"].append(i)
-                            color = (255,102,102)
-                        shadow_bw = cv2.drawContours(empyt_img_bw, contours, i, color=255, thickness=-1)
-                        shadow_c = cv2.drawContours(empyt_img_c, contours, i, color=color, thickness=-1)
+    y_limit: list
+    switch_list: list
 
-                print("drop wheel", drop_wheel)
-                # cv2.imshow('detected hough_wheel', empyt_img_c)
-                # cv2.waitKey(0)
-                # 如果还是没有找齐两个轮子，则对等高线进行圆拟合
-                if len(drop_wheel)<2:
-                    y_limit = [None for j in range(len(mosaic_matrix[0]))]
-                    for i in contours_idx["car"]:
-                        car_part = [i[0] for i in contours[i]]
-                        car_part.append(car_part[0])
-                        car_part = interpolate_by_pixel(car_part)
-                        for p in car_part:
-                            if y_limit[p[0]] is None or p[1] < y_limit[p[0]]:
-                                y_limit[p[0]] = p[1]
 
-                    y_limit_continuous = []
-                    for i in range(len(y_limit)):
-                        if y_limit[i]:
-                            y_limit_continuous.append([i, y_limit[i]])
-                    y_limit_continuous = interpolate_by_stepLen(y_limit_continuous, 5)
-                    pyplot.plot(y_limit,"r-+")
-                    # new_plot(y_limit_continuous, "b*-")
-                    v = []
-                    for i in range(len(y_limit_continuous)-1):
-                        p1 = y_limit_continuous[i]
-                        p2 = y_limit_continuous[i+1]
-                        local_v = (p2[1] - p1[1]) / (p2[0] - p1[0])
-                        int_x = round((p2[0] + p1[0]) / 2)
-                        if v == [] or v[-1][0] != int_x :
-                            v.append([int_x, local_v])
-                        elif abs(v[-1][1]) < abs(local_v):
-                            v[-1][1] = local_v
-                    v = interpolate_by_pixel(v, False)
-                    v_head = [[i, v[0][1]] for i in range(v[0][0])]
-                    v= v_head+v
-                    from scipy.signal import savgol_filter
-                    savgol_v = savgol_filter([i[1] for i in v], 11, 5)
-                    # pyplot.plot(savgol_v, "g-")
+    def __init__(self, car: list, p_min: list, p_max: list):
+        self.p_min, self.p_max = p_min, p_max
+        self.mid = (p_max[0] - p_min[0]) / self.pixel_size * self.extention / 2
+        self.img = pixel(car, self.pixel_size, self.p_min, self.p_max, darkest=1, extention=self.extention)
+        self.empty_img_c = numpy.array([numpy.array([[0, 0, 0] for j in range(len(self.img[0]))], dtype=numpy.uint8)
+                                        for i in range(len(self.img))], dtype=numpy.uint8)
+        self.drop_wheels = []
+        self.fitting_wheels = []
+        self.wheels = []
+        self.v = []
+        self.car_contours = []
+        self.all_contours = []
+        self.bds_range={}
+        self.bds= {}
 
-                    new_plot(v)
+
+    def find_wheel(self):
+        self.find_drop_wheel()
+        if not self.all_contours:
+            return None
+        if len(self.drop_wheels) == 2:
+            self.wheels = self.drop_wheels
+        else:
+            if not self.car_contours or len(self.drop_wheels) > 2:
+                self.car_contours = self.all_contours
+            self.get_lower_edge()
+            self.estimate_circle_center()
+            from scipy.optimize import minimize
+            for switch in self.switch_list:
+                try:
+                    fitting_points = self.locate_fitting_points(switch)
+                    para_estimate = numpy.array([round(self.suppose_center_x[switch]), self.pixel_wheel_diam_rang[1],
+                                                 self.pixel_wheel_diam_rang[1]])
+                    a = minimize(lambda para_list: sum_error(point_list=fitting_points,
+                                                             x=para_list[0], y=para_list[1], r=para_list[2]),
+                                 x0=para_estimate,
+                                 bounds=((self.bds[switch][0] + self.pixel_wheel_diam_rang[0] * 0.5,
+                                          self.bds[switch][1] - self.pixel_wheel_diam_rang[0] * 0.5),
+                                         (self.pixel_wheel_diam_rang[0], self.pixel_wheel_diam_rang[1]),
+                                         (self.pixel_wheel_diam_rang[0], self.pixel_wheel_diam_rang[1]))
+                             )
+                    x = [a.x[0], a.x[1], a.x[2]]
+                except:
+                    r = (self.pixel_wheel_diam_rang[0]+self.pixel_wheel_diam_rang[1])/2
+                    x = [self.suppose_center_x[switch], r, r]
+                self.fitting_wheels.append(x)
+                self.add_opencv_circle(numpy.int0(x),(0,255,0))
+            if len(self.fitting_wheels) > 1:
+                self.wheels = self.fitting_wheels
+            else:
+                self.wheels = self.fitting_wheels + self.drop_wheels
 
 
 
+    def find_drop_wheel(self):
+        dilate = cv2.dilate(self.img, kernel_n(n=2), iterations=1)
+        erosion = cv2.erode(dilate, kernel_n(n=3), iterations=1)
+        contours, hierarchy = cv2.findContours(erosion, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
+        for i in range(len(contours)):
+            if cv2.contourArea(contours[i]) > 1000:
+                self.car_contours.append(contours[i])
+                (x, y), radius = cv2.minEnclosingCircle(contours[i])
+                if self.pixel_wheel_diam_rang[0] < radius < self.pixel_wheel_diam_rang[1] and \
+                        self.pixel_wheel_diam_rang[0] < y < self.pixel_wheel_diam_rang[1] and \
+                        abs(x - self.mid) > self.pixel_wheel_diam_rang[0] and\
+                        cv2.contourArea(contours[i]) > 3000:
+                    color = (153, 255, 255)
+                    self.drop_wheels.append([x, y, radius])
+                    (x, y, radius) = numpy.int0((x, y, radius))
+                    self.add_opencv_circle((x, y, radius), (0, 0, 255))
+                else:
+                    color = (255, 102, 102)
+                cv2.drawContours(self.empty_img_c, contours, i, color=color, thickness=-1)
+        # 判断还缺前后哪个轮子
+        if len(self.drop_wheels) == 2:
+            self.switch_list = []
+        elif len(self.drop_wheels) == 1:
+            if self.drop_wheels[0][0] > self.mid:
+                self.switch_list = [0]
+            else:
+                self.switch_list = [1]
+        else:
+            self.switch_list = [0, 1]
 
+        # print(self.switch_list)
+        # print("drop wheel", self.drop_wheel)
+        # cv2.imshow('detected hough_wheel', self.empty_img_c)
+        # cv2.waitKey(0)
 
+    def get_lower_edge(self):
+        self.y_limit = [None for j in range(len(self.img[0]))]
+        for car_part in self.car_contours:
+            car_part = [i[0] for i in car_part.tolist()]
+            car_part.append(car_part[0])
+            car_part = interpolate_by_pixel(car_part)
+            for p in car_part:
+                if self.y_limit[p[0]] is None or p[1] < self.y_limit[p[0]]:
+                    self.y_limit[p[0]] = p[1]
+        self.y_limit_continuous = []
+        for i in range(len(self.y_limit)):
+            if self.y_limit[i] is not None:
+                self.y_limit_continuous.append([i, self.y_limit[i]])
+        self.y_limit_continuous = interpolate_by_stepLen(self.y_limit_continuous, 5)
+        for i in range(len(self.y_limit_continuous) - 1):
+            p1 = self.y_limit_continuous[i]
+            p2 = self.y_limit_continuous[i + 1]
+            local_v = (p2[1] - p1[1]) / (p2[0] - p1[0])
+            int_x = round((p2[0] + p1[0]) / 2)
+            if self.v == [] or self.v[-1][0] != int_x:
+                self.v.append([int_x, local_v])
+            elif abs(self.v[-1][1]) < abs(local_v):
+                self.v[-1][1] = local_v
+        self.v = interpolate_by_pixel(self.v, False)
+        v_head = [[i, self.v[0][1]] for i in range(self.v[0][0])]  # 微分后会差两位，补全
+        self.v = v_head + self.v
 
-                    # 将轮廓线分成左右两半，并找最低点
-                    mid = (p_max[0] - p_min[0]) / pixel_size * extention / 2
-                    outline_split = [[], []]
-                    lowest = [[], []]
-                    print(len(y_limit))
-                    for i in range(len(y_limit)):
-                        if y_limit[i] is not None:
-                            p = [i, y_limit[i]]
-                            if i < mid:
-                                switch = 0
-                            else:
-                                switch = 1
-                            outline_split[switch].append(p)
-                            if lowest[switch]:
-                                if lowest[switch][0][1] > p[1]:
-                                    lowest[switch].clear()
-                                    lowest[switch].append(p)
-                                elif lowest[switch][0][1] == p[1]:
-                                    lowest[switch].append(p)
-                            else:
-                                lowest[switch].append(p)
+    def estimate_circle_center(self):
+        lowest = [[], []]
+        for i in range(len(self.y_limit)):
+            if self.y_limit[i] is not None:
+                p = [i, self.y_limit[i]]
+                if i < self.mid:
+                    switch = 0
+                else:
+                    switch = 1
+                if lowest[switch]:
+                    if lowest[switch][0][1] > p[1]:
+                        lowest[switch].clear()
+                        lowest[switch].append(p)
+                    elif lowest[switch][0][1] == p[1]:
+                        lowest[switch].append(p)
+                else:
+                    lowest[switch].append(p)
+        self.suppose_center_x = []
+        for i in range(2):
+            if lowest[i]:
+                self.suppose_center_x.append(sum([j[0] for j in lowest[i]]) / len(lowest[i]))
+            else:
+                if i == 0:
+                    self.suppose_center_x.append((self.mid +self.p_min[0])/2)
+                else:
+                    self.suppose_center_x.append((self.mid +self.p_max[0])/2)
 
-                    suppose_center_x = [sum([i[0] for i in lowest[0]]) / len(lowest[0]),
-                                        sum([i[0] for i in lowest[1]]) / len(lowest[1])]
-                    # 如果左轮已经找到，则左边不找，如果右轮已经找到，则右边不找
-                    if len(drop_wheel) == 1:
-                        if drop_wheel[0][0] > mid:
-                            switch_list = [0]
-                        else:
-                            switch_list = [1]
-                    else:
-                        switch_list = [0, 1]
-                    print(switch_list)
+    def locate_fitting_points(self, switch):
+        left = [self.v[int(self.suppose_center_x[switch])], self.v[int(self.suppose_center_x[switch])]]
+        right = [self.v[int(self.suppose_center_x[switch])], self.v[int(self.suppose_center_x[switch])]]
+        for i in range(max(int(self.suppose_center_x[switch] - self.pixel_wheel_diam_rang[0] * 0.5), 0),
+                       int(self.suppose_center_x[switch] - self.pixel_wheel_diam_rang[1] * 1.2), -1):
+            if left[0][1] < self.v[i][1]:
+                left[0] = self.v[i]
+            if left[1][1] > self.v[i][1]:
+                left[1] = self.v[i]
+        for i in range(int(self.suppose_center_x[switch] + self.pixel_wheel_diam_rang[0] * 0.5),
+                       min(int(self.suppose_center_x[switch] + self.pixel_wheel_diam_rang[1] * 1.2), len(self.v))):
+            if right[0][1] < self.v[i][1]:
+                right[0] = self.v[i]
+            if right[1][1] > self.v[i][1]:
+                right[1] = self.v[i]
+        self.bds_range[switch] = [left, right]
+        bds = [None, None]
+        if left[0][0] > left[1][0] and abs(left[1][1] / left[0][1]) > 1.5:
+            bds[0] = left[1][0] - 1
+        else:
+            bds[0] = left[0][0] + 1
+        if right[0][0] > right[1][0] and abs(right[0][1] / right[1][1]) > 1.5:
+            bds[1] = right[0][0] + 1
+        else:
+            bds[1] = right[1][0] - 1
+        self.bds[switch] = bds
+        fitting_points = numpy.array([[i, self.y_limit[i]] for i in range(bds[0], bds[1] + 1)])
+        if left == [self.v[int(self.suppose_center_x[switch])], self.v[int(self.suppose_center_x[switch])]] or\
+            right == [self.v[int(self.suppose_center_x[switch])], self.v[int(self.suppose_center_x[switch])]]:
+            return None
+        return fitting_points
 
-                    # 找轮子
-                    fitting_circle = []
+    def plot_mosaic(self):
+        from matplotlib import pyplot
+        pyplot.figure(figsize=(20, 5))
+        c = pyplot.pcolormesh(self.img, cmap='magma')
+        pyplot.colorbar(c)
+        pyplot.axis("equal")
+        pyplot.show()
 
+    def plot_fitting_situation(self, switch):
+        from matplotlib import pyplot
+        pyplot.plot(self.y_limit, "r-+")
+        new_plot(self.v)
+        for i in self.car_contours:
+            new_plot(i)
+        new_plot([self.suppose_center_x[switch], 0], "co")
+        left, right = self.bds_range[switch]
+        new_plot(left, "ro")
+        new_plot(right, "ro")
+        new_plot([self.v[self.bds[switch][0]], self.v[self.bds[switch][1]]], "b^")
+        new_plot(self.v[int(self.suppose_center_x[switch] + self.pixel_wheel_diam_rang[0] * 0.5)], "yo")
+        new_plot(self.v[max(int(self.suppose_center_x[switch] - self.pixel_wheel_diam_rang[0] * 0.5), 0)], "yo")
+        new_plot(self.v[int(self.suppose_center_x[switch] - self.pixel_wheel_diam_rang[1] * 1.2)], "yo")
+        new_plot(self.v[min(int(self.suppose_center_x[switch] + self.pixel_wheel_diam_rang[1] * 1.2), len(self.v) - 1)],
+                 "yo")
+        pyplot.axis("equal")
+        pyplot.show()
 
-                    def sum_error(point_list: list, x: float, y: float, r: float):
-                        res = 0
-                        for p in point_list:
-                            one_err = (r - math.sqrt((x - p[0]) ** 2 + (y - p[1]) ** 2)) ** 2
-                            res += one_err
-                        return res
+    def add_opencv_circle(self, circle_para, color):
+        cv2.circle(self.empty_img_c, (circle_para[0], circle_para[1]), circle_para[2], color, 2)
+        cv2.circle(self.empty_img_c, (circle_para[0], circle_para[1]), 2, color, 3)
 
-
-                    from scipy.optimize import minimize
-
-                    fitting_points = [[], []]
-                    for switch in switch_list:
-                        print("low", lowest[switch])
-                        left = [v[round(suppose_center_x[switch])], v[round(suppose_center_x[switch])]]
-                        right = [v[round(suppose_center_x[switch])], v[round(suppose_center_x[switch])]]
-                        for i in range(max(int(suppose_center_x[switch] - pixel_wheel_diam_rang[0]*0.5),0),
-                                        int(suppose_center_x[switch] - pixel_wheel_diam_rang[1]*1.2), -1):
-                            if left[0][1] < v[i][1]:
-                                left[0] = v[i]
-                            if left[1][1] > v[i][1]:
-                                left[1] = v[i]
-                        for i in range(int(suppose_center_x[switch] + pixel_wheel_diam_rang[0] * 0.5),
-                                    min(int(suppose_center_x[switch] + pixel_wheel_diam_rang[1] * 1.2),len(v))):
-                            if right[0][1] < v[i][1]:
-                                right[0] = v[i]
-                            if right[1][1] > v[i][1]:
-                                right[1] = v[i]
-                        bds = [None,None]
-                        if left[0][0] > left[1][0] and abs(left[1][1]/left[0][1]) > 1.5:
-                            bds[0] = left[1][0]-1
-                        else:
-                            bds[0] = left[0][0]+1
-                        if right[0][0] > right[1][0] and abs(right[0][1]/right[1][1]) > 1.5:
-                            bds[1] = right[0][0]+1
-                        else:
-                            bds[1] = right[1][0] - 1
-
-                        new_plot([suppose_center_x[switch],0],"co")
-                        new_plot(left,"ro")
-                        new_plot(right, "ro")
-                        new_plot([v[bds[0]],v[bds[1]]],"b^")
-                        new_plot(v[int(suppose_center_x[switch] + pixel_wheel_diam_rang[0] * 0.5)],"yo")
-                        new_plot(v[max(int(suppose_center_x[switch] - pixel_wheel_diam_rang[0]*0.5),0)], "yo")
-                        new_plot(v[int(suppose_center_x[switch] - pixel_wheel_diam_rang[1]*1.2)], "yo")
-                        new_plot(v[min(int(suppose_center_x[switch] + pixel_wheel_diam_rang[1] * 1.2),len(v)-1)], "yo")
-                        fitting_points[switch] = numpy.array([[i,y_limit[i]]for i in range(bds[0],bds[1]+1)])
-                        para_estimate = numpy.array([round(suppose_center_x[switch]), pixel_wheel_diam_rang[1],
-                                                     pixel_wheel_diam_rang[1]])
-                        print("**", para_estimate)
-                        a = minimize(lambda para_list: sum_error(point_list=fitting_points[switch],
-                                                                  x=para_list[0], y=para_list[1], r=para_list[2]),
-                                      x0 = para_estimate,
-                                      bounds=((bds[0] + pixel_wheel_diam_rang[0]*0.5, bds[1] - pixel_wheel_diam_rang[0]*0.5),
-                                              (pixel_wheel_diam_rang[0], pixel_wheel_diam_rang[1]),
-                                              (pixel_wheel_diam_rang[0], pixel_wheel_diam_rang[1]))
-                                      )
-                        print(a.x)
-                        # if a[1] - a[2] > lowest[switch][0][1]:
-                        #     a[1] = lowest[switch][0][1] + a[2]
-                        fitting_circle.append([a.x[0], a.x[1], a.x[2]])
-                    print("fc", fitting_circle)
-
-
-                    outline = []
-                    for i in contours_idx["car"]:
-                        outline += [i[0] for i in contours[i]]
-                    new_plot(outline)
-                    for i in range(len(fitting_circle)):
-                        # new_plot(fitting_points[switch], "y")
-                        new_plot(build_cicle([fitting_circle[i][0], fitting_circle[i][1]], fitting_circle[i][2]))
-                        new_plot(build_cicle([fitting_circle[i][0], fitting_circle[i][1]], 3))
-                    pyplot.axis("equal")
-                    pyplot.show()
-                    fitting_circle = numpy.array(fitting_circle, dtype=numpy.uint16)
-                    for c in fitting_circle:
-                        cv2.circle(empyt_img_c, (c[0], c[1]), c[2], (0, 255, 0), 2)
-                        cv2.circle(empyt_img_c, (c[0], c[1]), 2, (0, 255, 0), 3)
-                #
-                # cv2.imshow('detected hough_wheel', empyt_img_c)
-                # cv2.waitKey(0)
+    def plot_opencv(self):
+        cv2.imshow('detected hough_wheel', self.empty_img_c)
+        cv2.waitKey(0)
