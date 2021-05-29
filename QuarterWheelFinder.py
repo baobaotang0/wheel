@@ -40,15 +40,17 @@ class QuarterWheelFinder:
         self.img_side = pixel(car, self.pixel_size, self.p_min, self.p_max, darkest=1, extention=self.extention)
         self.img_side = cv2.dilate(self.img_side, kernel_n(n=2), iterations=1)
         self.img_side = cv2.erode(self.img_side, kernel_n(n=3), iterations=1)
-
+        # plot_mosaic(self.img_side)
         # debug用的侧视图的opencv画布
         self.empty_img_side_c = numpy.array(
             [numpy.array([[0, 0, 0] for j in range(len(self.img_side[0]))], dtype=numpy.uint8)
              for i in range(len(self.img_side))], dtype=numpy.uint8)
 
-        self.drop_wheel = []
-        self.fitting_wheel = []
-        self.fake_wheel = []
+        self._drop_wheel = []
+        self._fitting_wheel = []
+        self.fake_wheel_x = []
+        self.prior_wheel_x = []
+        self.waiting_list_wheel_x = []
         self._y_limit_continuous = []
         self._v = []
         self._img_side_contours = []
@@ -58,26 +60,62 @@ class QuarterWheelFinder:
         self._estimate_center_match = []
         self._bds_range = []
         self._bds = []
-        self.error = []
 
         self._find_wheel()
         self._match_wheel()
 
 
 
-
+    def get_wheel(self):
+        if self.prior_wheel_x:
+            return self.prior_wheel_x
+        elif self.waiting_list_wheel_x:
+            return self.waiting_list_wheel_x
+        else:
+            return self.fake_wheel_x
 
     def _match_wheel(self):
         def _pixel_to_real(l):
             for idx, i in enumerate(l):
                 l[idx] = [j / self.extention * self.pixel_size for j in i]
+                l[idx][0] = l[idx][0] + self.p_min[0]
+                l[idx][1] = l[idx][1] + self.p_min[1]
+        def _takeForth(elem):
+            return elem[3]
 
-        _pixel_to_real(self.drop_wheel)
-        _pixel_to_real(self.fitting_wheel)
-        _pixel_to_real(self.fake_wheel)
-        print(self.drop_wheel)
-        print(self.fitting_wheel)
-        print(self.fake_wheel)
+        _pixel_to_real(self._drop_wheel)
+        _pixel_to_real(self._fitting_wheel)
+
+        used_set = []
+        for dw in self._drop_wheel:
+            for fw in self._fitting_wheel:
+                if fw in used_set:
+                    continue
+                if abs(dw[0]-fw[0]) < 0.02:
+                    self.prior_wheel_x.append((dw[0]+fw[0])/2)
+                    used_set.append(fw)
+                    used_set.append(dw)
+
+        self._fitting_wheel.sort(key=_takeForth)
+
+        for fw in self._fitting_wheel:
+            if fw not in used_set:
+                self.waiting_list_wheel_x.append(fw[0])
+                break
+
+        if not self.waiting_list_wheel_x:
+            for dw in self._drop_wheel:
+                if dw in used_set:
+                    continue
+                else:
+                    self.waiting_list_wheel_x.append(dw[0])
+
+        if not (self.prior_wheel_x or self.waiting_list_wheel_x or self.fake_wheel_x):
+            self.fake_wheel_x.append((self.p_min[0]+self.p_max[0])/2)
+
+        # print("prior",self.prior_wheel_x)
+        # print("waitting list", self.waiting_list_wheel_x)
+        # print("fake",self.fake_wheel_x)
 
     def _find_wheel(self):
         self._estimate_wheel_center_by_vertical_view()
@@ -139,7 +177,7 @@ class QuarterWheelFinder:
                         self.pixel_wheel_diam_rang[0] < x < self.p_max_pixel[0] - self.pixel_wheel_diam_rang[0] and \
                         area > self.circle_area_filter:
                     cv2.drawContours(self.empty_img_side_c, contours, i, color=(153, 255, 255), thickness=-1)
-                    self.drop_wheel.append([x, y, radius])
+                    self._drop_wheel.append([x, y, radius])
                     (x, y, radius) = numpy.int0((x, y, radius))
                     add_opencv_circle(self.empty_img_side_c, (x, y, radius), (255, 0, 0))
 
@@ -162,8 +200,8 @@ class QuarterWheelFinder:
                 elif lowest[0][1] > round(p[1]):
                     lowest.clear()
                     lowest.append(p)
-        pyplot.plot(self._y_limit, "sg-")
-        new_plot(lowest, "or")
+        # pyplot.plot(self._y_limit, "sg-")
+        # new_plot(lowest, "or")
         lowest = split_list(lowest)
         self._estimate_center_side = [(sum([j[0] for j in i]) / len(i)) for i in lowest]
         for i in self._estimate_center_ver:
@@ -195,13 +233,15 @@ class QuarterWheelFinder:
             elif abs(self._v[-1][1]) < abs(local_v):
                 self._v[-1][1] = local_v
         self._v = interpolate_by_pixel(self._v, False)
-        v_head = [[i, self._v[0][1]] for i in range(self._v[0][0])]  # 微分后会差两位，补全
+        v_head = [[i, self._v[0][1]] for i in range(self._v[0][0])]  # 微分后会差几位，补全
         self._v = v_head + self._v
+        v_tail = [[i, self._v[-1][1]] for i in range(len(self._v),len(self._y_limit))]
+        self._v = self._v + v_tail
         """尝试对self._estimate_center_match列表中每一个预测圆形的位置进行圆拟合"""
         for estimate_x in self._estimate_center_match:
             """找到左右两侧距离中心self.pixel_wheel_diam_rang[0] * 0.5 到 x0 - self.pixel_wheel_diam_rang[1] * 1.2 范围内，
                 下缘线的斜率的最高点和最低点"""
-            x0 = round(estimate_x)
+            x0 = int(estimate_x)
             left = [self._v[x0], self._v[x0]]
             right = [self._v[x0], self._v[x0]]
             for i in range(int(x0 - self.pixel_wheel_diam_rang[0] * 0.5),
@@ -254,20 +294,19 @@ class QuarterWheelFinder:
                                      (self.pixel_wheel_diam_rang[0], self.pixel_wheel_diam_rang[1]))
                              )
 
-                x = [a.x[0], a.x[1], a.x[2]]
-                self.fitting_wheel.append(x)
-                self.error.append(a.fun)
+                x = [a.x[0], a.x[1], a.x[2], a.fun]
                 color = (0,0,255)
+                self._fitting_wheel.append(x)
                 # print(x, a.fun)
                 # self.plot_fitting_situation()
             except:
                 print("fitting failure")
                 r = (self.pixel_wheel_diam_rang[0] + self.pixel_wheel_diam_rang[1]) / 2
                 x = [estimate_x, r, r]
-                self.fake_wheel.append(x)
+                self.fake_wheel_x.append(estimate_x/ self.extention * self.pixel_size + self.p_min[0])
                 color = (0, 255,0)
             add_opencv_circle(self.empty_img_side_c, numpy.int0(x), color)
-        plot_opencv(self.empty_img_side_c)
+        # plot_opencv(self.empty_img_side_c)
 
     def plot_fitting_situation(self):
         pyplot.plot(self._y_limit, "r-+")
@@ -288,7 +327,7 @@ class QuarterWheelFinder:
             new_plot(self._v[max(int(self._estimate_center_match[i] - self.pixel_wheel_diam_rang[0] * 0.5), 0)], "yo")
             new_plot(self._v[int(self._estimate_center_match[i] - self.pixel_wheel_diam_rang[1] * 1.2)], "yo")
             new_plot(self._v[min(int(self._estimate_center_match[i] + self.pixel_wheel_diam_rang[1] * 1.2), len(self._v) - 1)], "yo")
-            new_plot(build_cicle([self.fitting_wheel[i][0], self.fitting_wheel[i][1]], self.fitting_wheel[i][2]))
+            new_plot(build_cicle([self._fitting_wheel[i][0], self._fitting_wheel[i][1]], self._fitting_wheel[i][2]))
 
         pyplot.axis("equal")
         pyplot.show()
