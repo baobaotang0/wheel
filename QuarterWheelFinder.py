@@ -13,7 +13,6 @@ class QuarterWheelFinder:
     wheel_diam_range = [0.55 / 2, 0.90 / 2]
     pixel_wheel_diam_rang = [int(wheel_diam_range[0] / pixel_size * extention),
                              math.ceil(wheel_diam_range[1] / pixel_size * extention)]
-    print(pixel_wheel_diam_rang)
     area_filter = 1000  # 不能小于2个像素点，这样边界会只有3个点而无法进行圆拟合
     circle_area_filter = pixel_wheel_diam_rang[0] ** 2 * math.pi / 2
 
