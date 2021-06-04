@@ -25,16 +25,6 @@ def is_positive(num: float, is_strict=True, loose_range=1e-8):
         else:
             return 0
 
-def is_clockwise(xyz_list: list):
-    length = len(xyz_list)
-    d = 0
-    for i in range(length - 1):
-        d += -0.5 * (xyz_list[i + 1][1] + xyz_list[i][1]) * (xyz_list[i + 1][0] - xyz_list[i][0])
-    if d < 0:
-        clockwise = True
-    else:
-        clockwise = False
-    return clockwise
 
 
 

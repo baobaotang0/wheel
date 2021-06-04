@@ -1,132 +1,101 @@
-import math
-import numpy
-from matplotlib import pyplot
-from scipy.optimize import minimize
 from scipy.signal import savgol_filter
-from math_tools import get_min_max,  interpolate_by_pixel, interpolate_by_stepLen,  calculate_dis, \
-sum_error
+from math_tools import interpolate_by_pixel
 from plot_tools import *
-import time
 
-class QuarterWheelFinder:
+class WheelConst:
+    pixel_tire_thickness = 7.5
     pixel_size = 0.02
     extention = 3
-    wheel_diam_range = [0.55 / 2, 0.90 / 2]
-    tire_thickness = 0.05
-    pixel_tire_thickness =tire_thickness/ pixel_size * extention
-    print("tt",pixel_tire_thickness)
-    pixel_wheel_diam_rang = [int(wheel_diam_range[0] / pixel_size * extention),
-                             math.ceil(wheel_diam_range[1] / pixel_size * extention)]
-    area_filter = 1000  # 不能小于2个像素点，这样边界会只有3个点而无法进行圆拟合
-    circle_area_filter = pixel_wheel_diam_rang[0] ** 2 * math.pi / 2
+    wheel_diam_range = (0.55 / 2, 0.90 / 2)
+    pixel_wheel_diam_rang = (int(wheel_diam_range[0] / pixel_size * extention),
+                             math.ceil(wheel_diam_range[1] / pixel_size * extention))
 
+
+class QuarterWheelFinder:
+    attr=WheelConst()
+    pixel_wheel_center:list
 
     def __init__(self, car: list, p_min, p_max, is_left: bool):
         self._car = car
-        self._p_min, self._p_max, = p_min, p_max
 
+        self.p_min, self.p_max, = p_min, p_max
         self._is_left = is_left
-        if is_left:
+
+        if len(self._car)>0:
+            self._mirror()
+            self._get_edge()
+            self._get_local_center()
+            self._get_wheel_center()
+            self.plot_situation()
+        else:
+            self.pixel_wheel_center = [(self.p_min[0]+self.p_max[0])/2, (self.p_min[1]+self.p_max[1])/2]
+
+    def _mirror(self):
+        if self._is_left:
             self._car = [[i[0],-i[1]] for i in self._car]
-            self._p_min[1], self._p_max[1], = -p_max[1], -p_min[1]
+            self.p_min[1], self.p_max[1], = -self.p_max[1], -self.p_min[1]
 
-        print("max,min", p_min, p_max)
-
-        self._edge = [None for j in range(self._p_max[0]-self._p_min[0]+1)]
+    def _get_edge(self):
+        self._edge = [None for j in range(self.p_max[0]-self.p_min[0]+1)]
         for p in self._car:
-            x = round(p[0]) - p_min[0]
+            x = round(p[0]) - self.p_min[0]
             if self._edge[x] is None or p[1] < self._edge[x]:
                 self._edge[x] = p[1]
-
         self._edge_continuous = [[i, self._edge[i]] for i in range(len(self._edge)) if self._edge[i] is not None]
+
         self._edge_continuous = interpolate_by_pixel(self._edge_continuous, False)
+        if len(self._edge_continuous) > 5:
+            savgol = savgol_filter([i[1] for i in self._edge_continuous], int(len(self._edge_continuous)/20)*2 +5, 3)
+            self._edge_continuous =[[self._edge_continuous[i][0], savgol[i]]for i in range(len(self._edge_continuous))]
+        
+    def _get_local_center(self):
+        self._lowest = self._edge_continuous[0] + [0]
+        for i in range(1,len(self._edge_continuous)):
+            if self._edge_continuous[i][1] < self._lowest[1]:
+                self._lowest = self._edge_continuous[i] + [i]
 
+        self._low_points = []
+        searching_radius = 40
+        start = max(self._lowest[2] - searching_radius, 0)
+        end = min(self._lowest[2] + searching_radius, len(self._edge_continuous)-1)
+        height = min(self._edge_continuous[start][1],
+                     self._edge_continuous[end][1])
+        for i in self._edge_continuous[start:end+1]:
+            if i[1] < height:
+                self._low_points.append(i)
+        if self._low_points:
+            self._local_center = [(self._low_points[0][0]+self._low_points[-1][0])/2,self._lowest[1]]
+        else:
+            self._local_center = [(self.p_max[0] - self.p_min[0]) / 2, self._lowest[1]]
+            self._low_points.append(self._local_center)
 
-        savgol = savgol_filter([i[1] for i in self._edge_continuous], int(len(self._edge_continuous)/20)*2 +5, 3)
-        # TODO: >5 judge
-        self._edge_continuous =[[self._edge_continuous[i][0], savgol[i]]for i in range(len(self._edge_continuous))]
+    def _get_wheel_center(self):
+        if self._is_left:
+            self.pixel_wheel_center = [self._local_center[0] + self.p_min[0], - self._local_center[1]]
+        else:
+            self.pixel_wheel_center =[self._local_center[0] + self.p_min[0], self._local_center[1]]
 
-
-        lowest = None
-        for i in self._edge:
-            if i is not None:
-                if lowest is None or i < lowest:
-                    lowest = i
-
-        low_points = []
-        for i in self._edge_continuous:
-            if i[1] < lowest + self.pixel_tire_thickness:
-                low_points.append(i)
-
-        self._estimate_center = [sum([i[0] for i in low_points])/len(low_points), lowest]
-
-
-
-        self._v = [[self._edge_continuous[i][0],
-                    +10*(self._edge_continuous[i+1][1]-self._edge_continuous[i][1])/ \
-                    (self._edge_continuous[i+1][0]-self._edge_continuous[i][0])]
-                   for i in range(len(self._edge_continuous)-1)]
-
-
-
-        para_estimate = numpy.array([0.1, -0.1*(low_points[0][0]+low_points[-1][0]), lowest])
-        a = minimize(lambda para_list: sum_error(point_list=low_points,
-                                                 a=para_list[0], b=para_list[1], c=para_list[2]),
-                     x0=para_estimate)
-
-        print(-a.x[1]/a.x[0]/2)
-        # for i, txt in enumerate(numpy.arange(len(self._car))):
-        #     pyplot.annotate(txt, self._car[i])
-
+    def plot_situation(self):
+        pyplot.subplot(2,1,1)
         pyplot.plot(self._edge,"*--")
         new_plot(self._edge_continuous)
-        new_plot([[i[0],a.x[0]*i[0]**2+a.x[1]*i[0]+a.x[2]]for i in low_points],"^-")
-        new_plot([[i[0],i[1]+ lowest]for i in self._v],"g")
-        new_plot([low_points[0],low_points[-1]],"o")
-        new_plot(self._estimate_center,"r*")
-        new_plot([-a.x[1]/a.x[0]/2, lowest],"bs")
-
+        new_plot([self._low_points[0],self._low_points[-1]],"o")
+        new_plot(self._local_center,"r*")
+        pyplot.axis("equal")
+        pyplot.subplot(2, 1, 2)
+        new_plot(self._car)
+        new_plot([self._local_center[0] + self.p_min[0], self._lowest[1]],"*")
         pyplot.axis("equal")
         pyplot.show()
 
 
 
 
-        self._estimate_center = []
-
-
-
-    def _match_wheel(self):
-        def _pixel_to_real(l):
-            for idx, i in enumerate(l):
-                l[idx] = [j / self.extention * self.pixel_size for j in i]
-                l[idx][0] = l[idx][0] + self._p_min[0]
-                l[idx][1] = l[idx][1] + self._p_min[1]
-
-
-
-        _pixel_to_real(self._fitting_wheel)
 
 
 
 
 
-    def _estimate_wheel_center_by_side_view(self):
-        lowest = []
-        for i in range(len(self._edge)):
-            if self._edge[i][1] < self:
-                lowest.clear()
-                lowest.append(self._edge[i])
-        # pyplot.plot(self._edge, "sg-")
-        # new_plot(lowest, "or")
-        lowest = split_list(lowest)
-        self._estimate_center_side = [(sum([j[0] for j in i]) / len(i)) for i in lowest]
-
-        # new_plot([[i, self._edge[round(i)]] for i in res], "*y")
-        # for i in self._estimate_center_ver:
-        #     new_plot([[i[1],i[2]],[i[1]+i[3],i[2]]],"b^-")
-        # pyplot.axis("equal")
-        # pyplot.show()
 
 
 
