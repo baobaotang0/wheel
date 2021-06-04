@@ -1,49 +1,5 @@
 import math
 import numpy
-import cv2
-from matplotlib import pyplot
-
-
-def new_plot(l: list, style=None):
-    if l is not []:
-        if style:
-            if isinstance(l[0], float) or isinstance(l[0], int):
-                pyplot.plot(l[0], l[1], style)
-            else:
-                pyplot.plot([p[0] for p in l], [p[1] for p in l], style)
-        else:
-            if isinstance(l[0], float) or isinstance(l[0], int):
-                pyplot.plot(l[0], l[1])
-            else:
-                pyplot.plot([p[0] for p in l], [p[1] for p in l])
-
-def plot_mosaic(pictures):
-    from matplotlib import pyplot
-    pyplot.figure(figsize=(20, 5))
-    c = pyplot.pcolormesh(pictures, cmap='magma')
-    pyplot.colorbar(c)
-    pyplot.axis("equal")
-    pyplot.show()
-
-def plot_opencv(picture):
-    cv2.imshow('detected hough_wheel', picture)
-    cv2.waitKey(0)
-
-def add_opencv_circle(picture,circle_para, color):
-    cv2.circle(picture, (circle_para[0], circle_para[1]), circle_para[2], color, 2)
-    cv2.circle(picture, (circle_para[0], circle_para[1]), 2, color, 3)
-
-
-def takeSecond(element):
-    return element[1]
-
-
-def build_cicle(center: list, radius: float, lineNum=12):
-    theta = numpy.linspace(0, math.pi * 2, lineNum)
-    res = []
-    for i in theta:
-        res.append([center[0] + math.cos(i) * radius, center[1] + math.sin(i) * radius])
-    return res
 
 
 def get_vector(point1, point2):
@@ -69,13 +25,26 @@ def is_positive(num: float, is_strict=True, loose_range=1e-8):
         else:
             return 0
 
+def is_clockwise(xyz_list: list):
+    length = len(xyz_list)
+    d = 0
+    for i in range(length - 1):
+        d += -0.5 * (xyz_list[i + 1][1] + xyz_list[i][1]) * (xyz_list[i + 1][0] - xyz_list[i][0])
+    if d < 0:
+        clockwise = True
+    else:
+        clockwise = False
+    return clockwise
+
+
+
 
 def calculate_dis(point1: list, point2: list) -> float:
     return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
 
 def interpolate_by_pixel(outline, y_is_int=True):
-    """只能给坐标为整数的点用"""
+    """只能给x坐标为整数的点用"""
     res = []
     for i in range(len(outline) - 1):
         if outline[i][0] == outline[i + 1][0]:
@@ -106,64 +75,27 @@ def get_min_max(cloud):
     return p_min, p_max
 
 
-def is_in_range(x: float, bounds: list):
-    if bounds[0] is not None and bounds[1] is not None:
-        flag = bounds[0] < x < bounds[1]
-    elif bounds[1] is not None:
-        flag = x < bounds[1]
-    elif bounds[0] is not None:
-        flag = bounds[0] < x
-    else:
-        flag = True
-    return flag
-
-
-def cut_cloud(cloud: list, boundary: dict, need_rest=False):
-    """boundary = {0: [xmin,xmax], 1:[ymin,ymax], 2:[zmin,zmax]...}"""
-    res = []
-    rest = []
-    cnt = len(cloud[0])
-    if cnt < len(boundary.keys()):
-        raise TypeError("")
-    for p in cloud:
-        is_in = 1
-        for i, bds in boundary.items():
-            is_in *= 1 if is_in_range(p[i], bds) else 0
-        if is_in == 1:
-            res.append([p[i] for i in range(cnt)])
-        elif need_rest:
-            rest.append([p[i] for i in range(cnt)])
-    if need_rest:
-        return res,rest
-    else:
-        return res
-
-
 def pixel(cloud: list, pixel_size: float, p_min: list, p_max: list, darkest: float, ignore_num = 0, extention=1, colored=False):
     resolution = [math.ceil((p_max[0] - p_min[0]) / pixel_size), math.ceil((p_max[1] - p_min[1]) / pixel_size)]
     res = [[0 for j in range(extention * (resolution[0] + 1))] for i in range(extention * (resolution[1] + 1))]
+    cnt = [[0 for j in range((resolution[0] + 1))] for i in range((resolution[1] + 1))]
+    def one_unit(j,i,value):
+        for k in range(extention):
+            for l in range(extention):
+                res[extention * j + k][extention * i + l] = value
     for p in cloud:
         i = int((p[0] - p_min[0]) / pixel_size)
         j = int((p[1] - p_min[1]) / pixel_size)
-        if i<= resolution[0]  and j <= resolution[1] :
-            for k in range(extention):
-                for l in range(extention):
-                    res[extention * j + k][extention * i + l] += 1
+        if i<= resolution[0] and j <= resolution[1] :
+            cnt[j][i] += 1
     for i in range(resolution[1]):
         for j in range(resolution[0]):
-            if res[extention * i][extention * j] > darkest:
-                for k in range(extention):
-                    for l in range(extention):
-                        res[extention * i + k][extention * j + l] = 255
-            elif res[extention * i][extention * j] <= ignore_num:
-                for k in range(extention):
-                    for l in range(extention):
-                        res[extention * i + k][extention * j + l] = 0
+            if cnt[i][j] > darkest:
+                one_unit(i,j, 255)
+            elif cnt[i][j] <= ignore_num:
+                one_unit(i,j, 0)
             else:
-                for k in range(extention):
-                    for l in range(extention):
-                        res[extention * i + k][extention * j + l] = int(
-                            255 / darkest * res[extention * i][extention * j])
+                one_unit(i,j,int(255 / darkest * res[extention * i][extention * j]))
     if colored:
         for i in range(len(res)):
             for j in range(len(res[0])):
@@ -171,6 +103,28 @@ def pixel(cloud: list, pixel_size: float, p_min: list, p_max: list, darkest: flo
     res = numpy.array(res, dtype=numpy.uint8)
     return res
 
+
+def xz_pixel(cloud: list, pixel_size: float, p_min: list, p_max: list, extention=1):
+    resolution = [math.ceil((p_max[0] - p_min[0]) / pixel_size), math.ceil((p_max[1] - p_min[1]) / pixel_size)]
+    res = [[0 for j in range(extention * (resolution[0] + 1))] for i in range(extention * (resolution[1] + 1))]
+    cnt = [[0 for j in range((resolution[0] + 1))] for i in range((resolution[1] + 1))]
+    def one_unit(j,i,value):
+        for k in range(extention):
+            for l in range(extention):
+                res[extention * j + k][extention * i + l] = value
+    for p in cloud:
+        i = int((p[0] - p_min[0]) / pixel_size)
+        j = int((p[2] - p_min[1]) / pixel_size)
+        if i <= resolution[0] and j <= resolution[1]:
+            cnt[j][i] += 1
+    for i in range(resolution[1]):
+        for j in range(resolution[0]):
+            if cnt[i][j] >= 1:
+                one_unit(i, j, 255)
+            else:
+                one_unit(i, j, 0)
+    res = numpy.array(res, dtype=numpy.uint8)
+    return res
 
 
 def kernel_n(n):
@@ -199,34 +153,16 @@ def interpolate_by_stepLen(outline: list, dis_step: float):
     return res
 
 
-def sum_error(point_list, x: float, y: float, r: float):
+def sum_error(point_list, a: float, b: float, c: float):
     res = 0
     for p in point_list:
-        one_err = (r - math.sqrt((x - p[0]) ** 2 + (y - p[1]) ** 2)) ** 2
+        one_err = (p[1] - (a*p[0]** 2 +b*p[0] + c)) ** 2
         res += one_err
     return res
 
 
-def split_list(input:list, judge_len=20):
-    res = [[input[0]]]
-    for i in range(1, len(input)):
-        if input[i][0] - res[-1][-1][0] <= judge_len:
-            res[-1].append(input[i])
-        else:
-            res.append([])
-            res[-1].append(input[i])
-    return res
-
-def get_lower_edge(max_len, contours_list):
-    res = [None for j in range(max_len)]
-    for car_part in contours_list:
-        car_part = [i[0] for i in car_part.tolist()]
-        car_part.append(car_part[0])
-        car_part = interpolate_by_pixel(car_part, False)
-        for p in car_part:
-            if res[p[0]] is None or p[1] < res[p[0]]:
-                res[p[0]] = p[1]
-    return res
 
 
-
+def get_rotate_matrix(angle):
+    angle = math.radians(angle)
+    return numpy.array([[math.cos(angle), -math.sin(angle)],[math.sin(angle),math.cos(angle),]])

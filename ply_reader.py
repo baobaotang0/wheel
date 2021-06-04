@@ -23,4 +23,5 @@ def path_iter(ROOT_PATH = "platform_data/"):
         #     continue
         if p.endswith('.ply'):
             print(p)
-            yield os.path.join(ROOT_PATH, p)
+            yield p
+            # yield os.path.join(ROOT_PATH, p)
